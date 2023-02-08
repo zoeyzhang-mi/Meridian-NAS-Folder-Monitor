@@ -1,9 +1,9 @@
 # Monitor Path
 #path = r"C:/Users/meridian/Desktop/Test Folder"
-path_to_track = r"/volume1/hk-production/Module_Production"
+path_to_track = r"/home/zoey/production_data/test_data"
 
 #script path (saving Pointers.json)
-script_path = r"/volume1/hk-production/Meridian NAS Folder Monitor/"
+script_path = r"/home/zoey/production_data/Meridian_Folder_Monitor"
 
 # Post URL
 # url = r'http://10.143.4.218/B3J001/M3J001Uplod1/Uploaddata'
@@ -25,4 +25,3 @@ bool_print_response_content = True
 
 # Slash r'/' or Backslash '\\'
 slash = r'/'
- 
