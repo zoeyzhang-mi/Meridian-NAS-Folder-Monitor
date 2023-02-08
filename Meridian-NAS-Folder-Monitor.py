@@ -1,4 +1,8 @@
 from audioop import add
+from cmath import exp
+from datetime import timezone
+from importlib.resources import read_text
+from multiprocessing import current_process
 from pprint import pprint
 from traceback import print_tb
 from typing_extensions import get_origin
@@ -7,9 +11,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import time
 import os
-import sys
 import requests
-import csv
 import json
 from threading import Timer
 from matplotlib import pyplot as plt
@@ -29,6 +31,7 @@ from openpyxl import load_workbook
 def get_current_time():
     current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
     return current_time
+# print("current time is " + get_current_time())
     
 FILENAMES = {
     'cp3030': 'Test_summary_30deg.tsv',
@@ -36,23 +39,33 @@ FILENAMES = {
     'cv3060': 'Test_summary_A30S60deg.tsv',
     'cv2237': 'Test_summary_A22S37Verification.tsv',
     'vis2237': 'Test_summary_A22S37Visual.tsv',
+    'prefix': 'Test_summary_A',
+    'verifi': 'Verification.tsv',
+    'visual': 'Visual.tsv',
     'focus': 'Test_summary_Focus.tsv'
     }
+    
 folder_to_track = fm_settings.path_to_track
 countdown_time = fm_settings.countdown_time_set
 time_out = fm_settings.time_out
 script_fm_path = fm_settings.script_path
 url = fm_settings.url
-url_calibration = fm_settings.url + r'/testing' #r'/calibration'
-url_focus = fm_settings.url + r'/testing' #r'/focus'
-url_module_log = fm_settings.url + r'/testing' #r'/module-log
-url_mpi = fm_settings.url + r'/testing' #r'/mpi'
+url_calibration = fm_settings.url + r'/calibration'
+url_focus = fm_settings.url + r'/focus'
+url_module_log = fm_settings.url + r'/module_log'
+url_mpi = fm_settings.url + r'/mpi'
+url_error = fm_settings.url + r'/error'
 
 bool_modified = False
 bool_parsing_data = False
 bool_changes = False
 data0 = ""
 new_folder_count = 1
+
+print(folder_to_track)
+print(countdown_time)
+print(time_out)
+print(script_fm_path)
 
 # Create a json file contains pointer informations
 try:
@@ -72,16 +85,20 @@ except:
             }
         json.dump(pointers, file, indent=4)
 
+
 def create_pointer(path):
     with open(script_fm_path + "pointers.json","r") as file:
         pointers = json.load(file)
     with open(script_fm_path + "pointers.json","w+") as file:
         try:
             row_num = sum(1 for line in open(path)) - 2
+            
         except:
             wb = load_workbook(path, read_only=True)
             sheet = wb.worksheets[0]
             row_num = sheet.max_row - 2
+            print(create_pointer()+"create_pointers_expect")
+            
         pointers[path]={
             'Path': os.path.dirname(path),
             'Pending to Parse': True,
@@ -92,6 +109,7 @@ def create_pointer(path):
             'Existence': True
             }
         json.dump(pointers, file, indent=4)
+        print("finish create_pointer"+create_pointer())
 
 def update_pointer(path, newPointer):
     global bool_changes
@@ -100,6 +118,7 @@ def update_pointer(path, newPointer):
         data = pointers[path]
     try:
             row_num = sum(1 for line in open(path)) - 2
+            #print()
     except:
         wb = load_workbook(path, read_only=True)
         sheet = wb.worksheets[0]
@@ -110,13 +129,17 @@ def update_pointer(path, newPointer):
         data['Last Update'] = get_current_time()
         data['Days Left'] = 14
         bool_changes = True
+        # print()
 
     if newPointer >= 0:
         data['Pointer'] = newPointer
+        # print()
 
     pointers[path] = data
     with open(script_fm_path + "pointers.json","w+") as file:
         json.dump(pointers, file, indent=4)
+    # print()
+
 
 def new_day():
     with open(script_fm_path + "pointers.json", "r") as file:
@@ -175,7 +198,7 @@ def fm_main():
     global bool_parsing_data, bool_modified, bool_changes, countdown_time
 
     countdown_time = fm_settings.countdown_time_set
-    #print()
+    # print("+++++++++++++++++++++++++++++++++++++++")
     if bool_modified == False and bool_changes == True:
         bool_modified = True
         bool_changes = False
@@ -223,15 +246,17 @@ def fm_main():
                 elif file_name == (FILENAMES['cv2237']):
                     file_key = 'cv2237'
                 elif file_name == (FILENAMES['vis2237']):
-                    file_key = 'vis2237'    
+                    file_key = 'vis2237'
+                elif file_name.__contains__(FILENAMES['prefix']) and file_name.__contains__(FILENAMES['visual']):
+                    file_key = 'vis2237' # for other tempertures
                 elif file_name == (FILENAMES['focus']):
                     file_key = 'focus'
                 else:
-                    file_key = 'etest'
+                    file_key = 'module_log'
                 
                 FILENAME = {file_key: file_name}
                 # Load Data
-                if file_key != 'etest':
+                if file_key != 'module_log':
                     try:
                         load_data(data['Path'], FILENAME)
                     except:
@@ -250,7 +275,7 @@ def fm_main():
 
                     global data0
                     df = getattr(data0, file_key)
-                    if file_key != 'focus' and 'etest':
+                    if file_key != 'focus' and 'module_log':
                         Ta = int(file_key[-4:-2])
                         Tb = int(file_key[-2:])
                         df['Ta'] = Ta
@@ -267,11 +292,19 @@ def fm_main():
                     setattr(data0, file_key, df)
 
                     if file_key == 'vis2237'and data['Rows'] != data['Pointer']:
-                        data1 = utils.CalibrationData([data['Path']], {'cv2237': (FILENAMES['cv2237'])}, uniquify=False, typify=False, verbose=False)
+                        if file_name == (FILENAMES['vis2237']):
+                            data1 = utils.CalibrationData([data['Path']], {'cv2237': (FILENAMES['cv2237'])}, uniquify=False, typify=False, verbose=False)
+                            Ta = int('cv2237'[-4:-2])
+                            Tb = int('cv2237'[-2:])
+                        else:
+                            data1 = utils.CalibrationData([data['Path']], {'cv2237': file_name.replace('Visual', 'Verification')}, uniquify=False, typify=False, verbose=False)
+                            Ta = int(file_name[-15:-13])
+                            Tb = int(file_name[-12:-10])
+                        print(Ta)
+                        print(Tb)
                         df2 = getattr(data1, 'cv2237')
 
-                        Ta = int('cv2237'[-4:-2])
-                        Tb = int('cv2237'[-2:])
+                        
                         df2['Ta'] = Ta
                         df2['Tb'] = Tb
                         #df['Calibration_Date'] = 'XXXXXXXXXX'
@@ -283,21 +316,25 @@ def fm_main():
                             df2 = df2.drop(columns='AMBIENT_median.1')
                         except:
                             pass
-                        df2['Delta_Avg'] = df2['SCENE_Avg'] - df2['Tb']
-                        df2['Delta_PTAT'] = df2['AMBIENT_median'] - df2['Ta']
-                        df2['SCENE_ptp'] = df2['SCENE_hi'] -  df2['SCENE_lo']
-                        df2['PTAT_ptp'] = df2['AMBIENT_hi'] -  df2['AMBIENT_lo']
-                        df2['Delta_Max'] = df2['SCENE_hi'] - df2['Tb']
-                        df2['Delta_Min'] = df2['SCENE_lo'] - df2['Tb']
-                        df2['Delta_VDD'] = df2['VDD'] - 3.3
+                        try:
+                            df2['Delta_Avg'] = df2['SCENE_Avg'] - df2['Tb']
+                            df2['Delta_PTAT'] = df2['AMBIENT_median'] - df2['Ta']
+                            df2['SCENE_ptp'] = df2['SCENE_hi'] -  df2['SCENE_lo']
+                            df2['PTAT_ptp'] = df2['AMBIENT_hi'] -  df2['AMBIENT_lo']
+                            df2['Delta_Max'] = df2['SCENE_hi'] - df2['Tb']
+                            df2['Delta_Min'] = df2['SCENE_lo'] - df2['Tb']
+                            df2['Delta_VDD'] = df2['VDD'] - 3.3
+                        except:
+                            print("e1")
                         setattr(data1, 'cv2237', df2)
 
 
                         #df2 = df2.merge(df[['Serial', 'Original Error', 'Visual Correct Error', 'RESULT_SUMMARY']], how='inner', on='Serial', suffixes=(None, '_vis'))
-                        df2 = pd.concat([df2, df['Original Error']], axis=1)
-                        df2 = pd.concat([df2, df['Visual Correct Error']], axis=1)
-                        df2 = pd.concat([df2, df['RESULT_SUMMARY']], axis=1)
+                        df2 = pd.concat([df2, df['Original Error ' + str(Ta) + str (Tb)]], axis=1)
+                        df2 = pd.concat([df2, df['Combine' + str(Ta) + str (Tb) + '_3060_Operator']], axis=1)
+                        df2 = pd.concat([df2, df['RESULT_SUMMARY' + str(Ta) + str (Tb)]], axis=1)
                         df = df2.copy()
+                        #print(df)
 
                 else:
                     df = pd.read_excel(path)
@@ -349,7 +386,7 @@ def fm_main():
                         print(line)
                         line_num += 1
                         if data['Pointer'] < line_num:
-                            if type(line.get('serialNumber')) == type("string"): # skip line if sn number is empty
+                            try: # skip line if sn number is empty
                                 try:
                                     response = s.post(url, json=line, timeout=time_out)
                                     if response.status_code != 201:
@@ -357,7 +394,20 @@ def fm_main():
                                         NAS_fm_log(f'Bad response from server: {response.status_code} for line: {line_num}')
                                         upload_log(data['Path'], "Time:" + get_current_time() + "\tPath: " + path + f"\tResult: fail in line {line_num}\t\tSummary: bad response {response.status_code} from server")
                                         success = False
-                                        return
+                                        try:
+                                            response = s.post(url_error, json=line, timeout=time_out)
+                                            data['Pointer'] += 1
+                                            update_pointer(path, data['Pointer'])
+                                            if fm_settings.bool_print_response:
+                                                print(response)
+                                                NAS_fm_log(response)
+                                            if fm_settings.bool_print_response_content:
+                                                print(response.text)
+                                                NAS_fm_log(response.text)
+                                                print()
+                                            continue
+                                        except:
+                                            return
                                     else:
                                         success = True
                                         data['Pointer'] += 1
@@ -387,7 +437,7 @@ def fm_main():
                                     upload_log(data['Path'], "Time:" + get_current_time() + "\tPath: " + path + f"\tResult: fail in line {line_num}\t\tSummary: time out")
                                     NAS_fm_log("Path: " + path + f"\tResult: fail in line {line_num}\t\tSummary: time out")
                                     return
-                            else: # skip line case: if sn number is float('nan')
+                            except: # skip line case: if sn number is float('nan')
                                 success = True
                                 data['Pointer'] += 1
                                 update_pointer(path, data['Pointer'])
@@ -414,87 +464,103 @@ def fm_main():
 # the following columns cannot be obtained from the Test_summary_*.tsv or Module_Log_*.xlsx files
 # for now we hard code them
 add_sfc_columns = {
-    'testConditions': 0,
-    'blackbody': 0,
-    'module':0,
+    #'Ta': 0,
+    #'Tb': 0,
     #'qcflag': 0,
     'rework': 0,
     #'station_id': 0 # change in following functions
 }
 
 def get_sfc_frame_module_log(df, add_columns=add_sfc_columns):
-    global url 
-    url = url_module_log
-    # station_id, x, y coordinate for etest
-    add_qr_columns = {
-        #'station_id': '0',    # station_id
-        'mpiID': 0,          # MPI machine id
-        'waferCoordX': 0,     # x coordinate
-        'waferCoordY': 0      # y coordinate
-    }
-    sfc2xlsx = {
-         # general
-        'date': 'Date',
-        'serialNumber': 'Serial Number',
-        
-        'vendorLot': 'Vendor Lot',
-        'operatorID': 'Operator ID',
-        'qrCode': 'Hashtag',
-        'result': 'Result',
-        'current': 'Current',
-        'comment':'Comments',
-        'moduleType': 'Module Type',
-        'batchComment': 'Batch Comment',
-        'batchName': 'Batch Name',
-        'errorCode': 'Error Code',
-        'waferNumber': 'Wafer Number',
-    }
-    xlsx2sfc = dict([(v, k) for k, v in sfc2xlsx.items()])
-    # drop columns if not of interest to SFC
-    # this potentially creates a problem if later we need new column name, with
-    # value of some columns in the original frame that we have dropped; but ignore for now
-    df = df[xlsx2sfc.keys()].copy()
-    # change to SFC naming
-    df.rename(columns=xlsx2sfc, inplace=True)
-    # add x, y coordinate columes
-    for k, v in add_qr_columns.items():
-        df[k] = v
-    # add extra columns, unrelated to original data from the jig
-    for k, v in add_columns.items():
-        df[k] = v
-    # special transformations
-    df.loc[df.result!='PASS', 'result'] = 0
-    df.loc[df.result=='PASS', 'result'] = 1
-    df.loc[df.moduleType=='Bobcat with IR04-1', 'moduleType'] = 1
-    df.loc[df.moduleType=='Bobcat with IR10-2', 'moduleType'] = 2
-    df.loc[df.moduleType=='Bobcat with MI0801-W', 'moduleType'] = 3
-    df.loc[df.moduleType=='Bobcat with MI0801-N', 'moduleType'] = 4
+    try:
+        global url 
+        url = url_module_log
+        df = df.fillna('')
+        # station_id, x, y coordinate for module_log
+        add_qr_columns = {
+            #'station_id': '0',    # station_id
+            'mpiID': 0,          # MPI machine id
+            'waferCoordX': 0,     # x coordinate
+            'waferCoordY': 0,      # y coordinate
+            'testType': "ModuleLog"
+        }
+        sfc2xlsx = {
+                # general
+            'date': 'Date',
+            'serialNumber': 'Serial Number',
+            'vendorLot': 'Vendor Lot',
+            'operatorID': 'Operator ID',
+            'qrCode': 'Hashtag',
+            'result': 'Result',
+            'current': 'Current',
+            'comment':'Comments',
+            'moduleType': 'Module Type',
+            'batchComment': 'Batch Comment',
+            'batchName': 'Batch Name',
+            'errorCode': 'Error Code',
+            'waferNumber': 'Wafer Number',
+        }
+        xlsx2sfc = dict([(v, k) for k, v in sfc2xlsx.items()])
+        # drop columns if not of interest to SFC
+        # this potentially creates a problem if later we need new column name, with
+        # value of some columns in the original frame that we have dropped; but ignore for now
+        df = df[xlsx2sfc.keys()].copy()
+        # change to SFC naming
+        df.rename(columns=xlsx2sfc, inplace=True)
+        # add x, y coordinate columes
+        for k, v in add_qr_columns.items():
+            df[k] = v
+        # add extra columns, unrelated to original data from the jig
+        #for k, v in add_columns.items():
+            #df[k] = v
+        # special transformations
+        df.loc[df.result!='PASS', 'result'] = 0
+        df.loc[df.result=='PASS', 'result'] = 1
+        df.loc[df.moduleType=='Bobcat with IR04-1', 'moduleType'] = 1
+        df.loc[df.moduleType=='Bobcat with IR10-2', 'moduleType'] = 2
+        df.loc[df.moduleType=='Bobcat with MI0801-W', 'moduleType'] = 3
+        df.loc[df.moduleType=='Bobcat with MI0801-N', 'moduleType'] = 4
 
-    # get station location / x / y coordinate of e-test, by 'serial_number_parser.py'
-    for index, item in enumerate(df.sn):
-        if type(item) == type("string"):
-            args = serial_number_parser.parse_args(item)
-            year, week, location, wafer_num, die, x, y = serial_number_parser.serial_parser(args)
-        else:
-            location = x = y = None
-        df.loc[index, 'mpiID'] = location
-        df.loc[index, 'waferCoordX'] = x
-        df.loc[index, 'waferCoordY'] = y
-        # Convert the following from float to int
-        df['mpiID'] = (df['mpiID'].fillna(-1).astype(int).astype(object).where(df['mpiID'].notnull()))
-        df['waferCoordX'] = (df['waferCoordX'].fillna(-1).astype(int).astype(object).where(df['waferCoordX'].notnull()))
-        df['waferCoordY'] = (df['waferCoordY'].fillna(-1).astype(int).astype(object).where(df['waferCoordY'].notnull()))
-        df['waferNumber'] = (df['waferNumber'].fillna(-1).astype(int).astype(object).where(df['waferNumber'].notnull()))
-        
-    df['date'] = df['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
-    df = df.fillna('')
+        # get station location / x / y coordinate of e-test, by 'serial_number_parser.py'
+
+        for index, item in enumerate(df.serialNumber):
+            try:
+                args = serial_number_parser.parse_args(item)
+                year, week, location, wafer_num, die, x, y = serial_number_parser.serial_parser(args)
+            except Exception as e:
+                print("serial number is empty")
+                print(e)
+                wafer_num = location = x = y = None
+            df.loc[index, 'mpiID'] = location
+            df.loc[index, 'waferCoordX'] = x
+            df.loc[index, 'waferCoordY'] = y
+            df.loc[index, 'waferNumber'] = wafer_num
+            #df.loc[index, 'date'] = datetime.strptime(df.loc[index, 'date'], '%d-%m-%Y %H:%M:%S')
+            #print(index)
+            # Convert the following from float to int
+            #df['mpiID'] = (df['mpiID'].fillna(-1).astype(int).astype(object).where(df['mpiID'].notnull()))
+            #df['waferCoordX'] = (df['waferCoordX'].fillna(-1).astype(int).astype(object).where(df['waferCoordX'].notnull()))
+            #df['waferCoordY'] = (df['waferCoordY'].fillna(-1).astype(int).astype(object).where(df['waferCoordY'].notnull()))
+            #df['waferNumber'] = (df['waferNumber'].fillna(-1).astype(int).astype(object).where(df['waferNumber'].notnull()))
+
+        #print(type(df['date'].iloc[0]))
+        #df['date'] = datetime.strptime(df['date'], '%d/%m/%y %H:%M:%S')
+        #print(type(df['date'].iloc[0]))
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df['date'] = df['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        #print( df['date'])
+        #print(type(df['date'].iloc[0]))
+        df = df.fillna('')
+    except Exception as e:
+        print("opps")
+        print(e)
     
     return df
 
-def get_sfc_frame_focus(df, optional=True, add_columns=add_sfc_columns):
+def get_sfc_frame_focus(df, add_columns=add_sfc_columns):
     global url 
     url = url_focus
-
+    df = df.fillna('')
     sfc2tsv = {
         # general
         'date': 'Date',
@@ -503,7 +569,6 @@ def get_sfc_frame_focus(df, optional=True, add_columns=add_sfc_columns):
         'operatorID': 'Operator id',
         'stationLocation': 'Station Location',
         'qrCode': 'QRcode',
-        'macID': 'MacID',
         'result': 'RESULT_SUMMARY',
         'errorCode': 'Error Code Focus',
         'moduleType': 'Module Type',
@@ -532,14 +597,20 @@ def get_sfc_frame_focus(df, optional=True, add_columns=add_sfc_columns):
     for k, v in add_columns.items():
         df[k] = v
 
-    #print(df.head(50))
+    add_column = {
+    'testType': "Focus"
+    }
+
+    for k, v in add_column.items():
+        df[k] = v
+
+    # print(df.head(50))
     # special transformations
-    #print(df.result.values.dtype)
-    df.loc[df.result!='FB01:Heat detected', 'result'] = "FAIL"
-    df.loc[df.result=='FB01:Heat detected', 'result'] = "PASS"
+    # print(df.result.values.dtype)
+    df.loc[df.result!='FB01:Heat detected', 'result'] = 0 # Fail
+    df.loc[df.result=='FB01:Heat detected', 'result'] = 1 # Pass
     df['date'] = df['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
     df = df.fillna('')
-
     return df
 
 
@@ -552,7 +623,7 @@ def get_sfc_frame_calibration_3030_6060(df, station_id="-1", add_columns=add_sfc
     # testdata_columns = ['PIXEL(40,30)', 'Summary']
     # # merge them into one column 
     # df['testdata_values_list'] = df[testdata_columns].values.tolist()
-
+    df = df.fillna('')
     df['test_result_dict']=df[[
         'LVCM',
         'RVCM',
@@ -581,7 +652,6 @@ def get_sfc_frame_calibration_3030_6060(df, station_id="-1", add_columns=add_sfc
         'serialNumber': 'Serial',
         'vendorLot': 'Vendor lot',
         'operatorID': 'Operator id',
-        'macID': 'MacID',
         'result': 'Result',
         'summary': 'Summary',
         'moduleType': 'ModuleType',
@@ -595,6 +665,8 @@ def get_sfc_frame_calibration_3030_6060(df, station_id="-1", add_columns=add_sfc
         'waferCoordY': 'WaferCoord Y',
         'waferErrorCode': 'WaferErrorCode',  # Error code from CP3 wafer-level testing
         # 3030/6060 station specific
+        'Ta': 'Ta',
+        'Tb': 'Tb',
         'testResult': 'test_result_dict',
     }
 
@@ -611,33 +683,47 @@ def get_sfc_frame_calibration_3030_6060(df, station_id="-1", add_columns=add_sfc
     for k, v in add_columns.items():
         df[k] = v
 
+    add_column_3030 = {
+    'testType': "Calibration3030"
+    }
+    add_column_6060 = {
+    'testType': "Calibration6060"
+    }
+    if station_id=="-1":
+        for k, v in add_column_3030.items():
+            df[k] = v
+    if station_id=="-2":
+        for k, v in add_column_6060.items():
+            df[k] = v
+
+
     #print(df.head(50))
     # special transformations
     #print(df.result.values.dtype)
 
     df.loc[df.result=='PASS', 'Summary'] = 'B01' # create B01 upon PASS here
-    #df.loc[df.result!='PASS', 'result'] = 0 # 0 == Fail
-    #df.loc[df.result=='PASS', 'result'] = 1 # 1 == Pass 
+    df.loc[df.result!='PASS', 'result'] = 0 # Fail
+    df.loc[df.result=='PASS', 'result'] = 1 # Pass 
 
     if station_id=="-1":
-        df['blackbody'] = 30
-        df['module'] = 30
+        df['Ta'] = 30
+        df['Tb'] = 30
     if station_id=="-2":
-        df['blackbody'] = 60
-        df['module'] = 60
-    df['testConditions']=df[['blackbody','module']].to_dict('records')
+        df['Ta'] = 60
+        df['Tb'] = 60
+    # df['testConditions']=df[['Ta','Tb']].to_dict('records')
     # df = df.drop('blackbody', 1)
     # df = df.drop('module', 1)
 
     df['date'] = df['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
     df = df.fillna('')
-    
 
     return df
 
 def get_sfc_frame_calibration_3060(df, add_columns=add_sfc_columns):
     global url 
     url = url_calibration
+    df = df.fillna('')
 
     # get required columns for testdata 
     df['test_result_dict']=df[[
@@ -685,7 +771,6 @@ def get_sfc_frame_calibration_3060(df, add_columns=add_sfc_columns):
         'serialNumber': 'Serial',
         'vendorLot': 'Vendor lot',
         'operatorID': 'Operator id',
-        'macID': 'MacID',
         'result': 'RESULT',
         'summary': 'RESULT_SUMMARY',
         'moduleType': 'ModuleType',
@@ -700,6 +785,8 @@ def get_sfc_frame_calibration_3060(df, add_columns=add_sfc_columns):
         'waferErrorCode': 'WaferErrorCode',  # Error code from CP3 wafer-level testing
         'stationLocation': 'Station Location',
         # 3060 station specific
+        'Ta': 'Ta',
+        'Tb': 'Tb',
         'errorCode': 'Error Code Calib',
         'testResult': 'test_result_dict',
     }
@@ -717,27 +804,33 @@ def get_sfc_frame_calibration_3060(df, add_columns=add_sfc_columns):
     for k, v in add_columns.items():
         df[k] = v
 
+    add_column = {
+    'testType': "Sensitivity"
+    }
+
+    for k, v in add_column.items():
+        df[k] = v
+
     #print(df.head(50))
     # special transformations
     #print(df.result.values.dtype)
 
-    #df.loc[df.result!='PASS', 'result'] = 0 # 0 == Fail
-    #df.loc[df.result=='PASS', 'result'] = 1 # 1 == Pass 
+    df.loc[df.result!='PASS', 'result'] = 0 # Fail
+    df.loc[df.result=='PASS', 'result'] = 1 # Pass 
     
     
-    df['blackbody'] = 60
-    df['module'] = 30
-    df['testConditions']=df[['blackbody','module']].to_dict('records')
+    df['Tb'] = 60
+    df['Ta'] = 30
+    #df['testConditions']=df[['Tb','Ta']].to_dict('records')
 
     df['date'] = df['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
     df = df.fillna('')
-
     return df
 
 def get_sfc_frame_verification_2237(df, add_columns=add_sfc_columns):
     global url 
     url = url_calibration
-
+    df = df.fillna('')
     # get required columns for testdata 
     # get required columns for testdata 
     df['test_result_dict']=df[[
@@ -777,13 +870,6 @@ def get_sfc_frame_verification_2237(df, add_columns=add_sfc_columns):
         'AMBIENT_median',
         'MedianSTDEV_RawPtat',
         'MedianSTDEV_RawPixel',
-        'Delta_Avg',
-        'Delta_PTAT',
-        'SCENE_ptp',
-        'PTAT_ptp',
-        'Delta_Max',
-        'Delta_Min',
-        'Delta_VDD',
         ]].to_dict('records')
 
     sfc2tsv = {
@@ -792,9 +878,8 @@ def get_sfc_frame_verification_2237(df, add_columns=add_sfc_columns):
         'serialNumber': 'Serial',
         'vendorLot': 'Vendor lot',
         'operatorID': 'Operator id',
-        'macID': 'MacID',
         'result': 'RESULT',
-        'summary': 'RESULT_SUMMARY',
+        'summary': 'RESULT_SUMMARY' + str(df['Ta'][0]) + str(df['Tb'][0]),
         'errorCode': 'Error Code Calib',
         'qrCode': 'QRcode',
         'moduleType': 'ModuleType',
@@ -809,8 +894,10 @@ def get_sfc_frame_verification_2237(df, add_columns=add_sfc_columns):
         'waferErrorCode': 'WaferErrorCode',  # Error code from CP3 wafer-level testing
         'stationLocation': 'Station Location',
         # 2237 station specific
-        'originalError': 'Original Error',
-        'visualCorrectError': 'Visual Correct Error',
+        'Ta': 'Ta',
+        'Tb': 'Tb',
+        'originalError': 'Original Error ' + str(df['Ta'][0]) + str(df['Tb'][0]),
+        'visualCorrectError': 'Combine'+ str(df['Ta'][0]) + str(df['Tb'][0]) + '_3060_Operator',
         'testResult': 'test_result_dict',
     }
 
@@ -827,20 +914,27 @@ def get_sfc_frame_verification_2237(df, add_columns=add_sfc_columns):
     for k, v in add_columns.items():
         df[k] = v
 
+    add_column = {
+    'testType': "Verification"
+    }
+
+    for k, v in add_column.items():
+        df[k] = v
+
     #print(df.head(50))
     # special transformations
     #print(df.result.values.dtype)
 
-    #df.loc[df.errorCode!='B00', 'result'] = 0 # 0 == Fail
-    #df.loc[df.errorCode=='B00', 'result'] = 1 # 1 == Pass 
+    df.loc[df.errorCode!='B00', 'result'] = 0 # Fail
+    df.loc[df.errorCode=='B00', 'result'] = 1 # Pass 
     
-    df['blackbody'] = 37
-    df['module'] = 22
-    df['testConditions']=df[['blackbody','module']].to_dict('records')
+    #df['Tb'] = 37
+    #df['Ta'] = 22
+    #df['testConditions']=df[['Tb','Ta']].to_dict('records')
 
     df['date'] = df['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
     df = df.fillna('')
-
+    #print(df)
     return df
 
 def check_pointer(filepath):
@@ -862,7 +956,9 @@ def scanning_file(path):
     cv2237 = FILENAMES['cv2237']
     vis2237 = FILENAMES['vis2237']
     focus = FILENAMES['focus']
-    etest = 'Module_Log'
+    prefix = FILENAMES['prefix']
+    visual = FILENAMES['visual']
+    module_log = 'Module_Log'
     for filename in os.listdir(path):
         if filename.__contains__(cp3030): 
             filepath = path + r'/' + cp3030
@@ -894,13 +990,19 @@ def scanning_file(path):
             NAS_fm_log(" on_modified " + filepath)
             check_pointer(filepath)
 
+        if filename.__contains__(prefix) and filename.__contains__(visual) and filename != vis2237: 
+            filepath = path + r'/' + filename
+            print(time.strftime("\r%Y-%m-%d %H:%M:%S", time.gmtime()) + " on_modified " + filepath)
+            NAS_fm_log(" on_modified " + filepath)
+            check_pointer(filepath)
+
         if filename.__contains__(focus): 
             filepath = path + r'/' + focus
             print(time.strftime("\r%Y-%m-%d %H:%M:%S", time.gmtime()) + " on_modified " + filepath)
             NAS_fm_log(" on_modified " + filepath)
             check_pointer(filepath)
 
-        if filename.__contains__(etest): 
+        if filename.__contains__(module_log): 
             filepath = path + r'/' + filename
             print(time.strftime("\r%Y-%m-%d %H:%M:%S", time.gmtime()) + " on_modified " + filepath)
             NAS_fm_log(" on_modified " + filepath)
@@ -960,12 +1062,12 @@ observer.start()
 
 def daily():
     while 1==1:
-        if time.strftime("%H") == "23": # Runs every night at 11pm
+        if time.strftime("%H") == "11": # Runs every night at 11pm
             new_day()
             delete_outdated_pointer()
         time.sleep(40*60) # Check the time every 40 mins
         
-print()
+print("for testing")
 print("============== Start NAS folder monitor ==============")
 NAS_fm_log("Start NAS folder monitor")
 
