@@ -1,0 +1,20 @@
+{
+    "Example": {
+        "Path": "/home/zoey/projects/upload_data_database",
+        "Pending to Parse": false,
+        "Rows": 0,
+        "Pointer": 0,
+        "Last Update": "2023-02-15 07:04:39",
+        "Days Left": 999999,
+        "Existence": true
+    },
+    "/home/zoey/projects/upload_data_database/BATCH_B12L0001_test_1502/Test_summary_60deg.tsv": {
+        "Path": "/home/zoey/projects/upload_data_database/BATCH_B12L0001_test_1502",
+        "Pending to Parse": true,
+        "Rows": 556,
+        "Pointer": 0,
+        "Last Update": "2022-03-09 01:45:34",
+        "Days Left": 999999,
+        "Existence": true
+    }
+}
